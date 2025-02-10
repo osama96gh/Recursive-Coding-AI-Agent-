@@ -1,0 +1,106 @@
+# Cline Rules: Recursive Development Agent
+
+## Project Patterns
+
+1. Code Organization
+   - Source code in src/ directory
+   - Tools organized in src/agents/tools/
+   - Workflows in src/workflows/
+   - Tests in tests/ directory
+   - State/history in memlog/ directory
+
+2. File Naming
+   - Python files use snake_case
+   - Class names use PascalCase
+   - Tool files end with _tools.py
+   - Schema files end with _schemas.py
+
+3. Documentation
+   - Memory Bank in memory-bank/ directory
+   - Required files: projectbrief.md, productContext.md, systemPatterns.md, techContext.md, activeContext.md, progress.md
+   - Each file serves specific documentation purpose
+   - Regular updates required for activeContext.md and progress.md
+
+4. Development Flow
+   - Tools must be used one at a time
+   - Wait for user confirmation after each tool use
+   - Check environment_details for context
+   - Consider active terminals before executing commands
+
+## Implementation Patterns
+
+1. Tool Usage
+   - Tools return structured responses
+   - Error handling is consistent
+   - Path validation for file operations
+   - JSON for data serialization
+
+2. State Management
+   - State tracked in memlog/project_state.json
+   - History in memlog/development_history.json
+   - State updates are atomic
+   - History entries include timestamps
+
+3. Error Handling
+   - Structured error responses
+   - Clear error messages
+   - State preservation on error
+   - Recovery mechanisms
+
+4. Testing
+   - Unit tests for tools
+   - Integration tests for workflows
+   - Async test support
+   - Error case coverage
+
+## User Interaction
+
+1. Request Processing
+   - Start with requirement clarification
+   - Use ask_human tool when needed
+   - Provide clear progress updates
+   - End with attempt_completion
+
+2. File Operations
+   - Validate paths against project root
+   - Create directories as needed
+   - Safe file operations
+   - Maintain file structure
+
+3. Command Execution
+   - Check active terminals first
+   - Explain command purpose
+   - Consider system compatibility
+   - Handle long-running processes
+
+4. Browser Interaction
+   - One browser action per message
+   - Wait for screenshots/logs
+   - Close browser when done
+   - Handle coordinates carefully
+
+## Project Intelligence
+
+1. Critical Paths
+   - main.py: Entry point and app initialization
+   - base.py: Core agent implementation
+   - recursive.py: Workflow definition
+   - tools/: Core functionality implementation
+
+2. State Flow
+   - User request → Analysis → Implementation → Enhancement → Validation
+   - State updates after each phase
+   - History tracking throughout
+   - Error recovery when needed
+
+3. Tool Dependencies
+   - CodeTools requires LLM
+   - FileTools needs project root
+   - ProjectTools combines both
+   - FeedbackTools handles interaction
+
+4. Safety Considerations
+   - Path validation is critical
+   - State persistence is required
+   - Error handling throughout
+   - User confirmation needed
