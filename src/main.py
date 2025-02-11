@@ -13,8 +13,32 @@ from src.config import validate_config
 from src.state.schema import ProjectState, CodeGenerationStatus
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+class CustomFormatter(logging.Formatter):
+    """Custom formatter that creates structured, readable logs."""
+    
+    def format(self, record):
+        if hasattr(record, 'state'):
+            # Format state updates
+            return f"\n[{record.levelname}] {record.msg}\nState: {record.state}"
+        return f"[{record.levelname}] {record.msg}"
+
+# Configure logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Remove existing handlers
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# Create console handler with custom formatter
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(CustomFormatter())
+logger.addHandler(console_handler)
+
+# Disable noisy logs
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 class RecursiveAgentApp:
     """Application wrapper for the recursive development agent."""
@@ -63,10 +87,10 @@ async def main():
             
             while True:
                 # Process the request
-                print("\nProcessing request...")
-                logger.debug(f"Processing request: {request}")
+                logger.info(f"\nProcessing request: {request}")
                 result = await app.process_request(request)
-                logger.debug(f"Got result: {result}")
+                if result.get("status") == "success":
+                    logger.info("Request processed successfully")
                 
                 # Display result
                 if result.get("status") == "success":
@@ -77,9 +101,11 @@ async def main():
                         print(f"\nError: {state.get('error_log', ['Unknown error'])[-1]}")
                         break
                     
-                    # Show project state
+                    # Show project state and cycle info
                     print(f"\nCurrent project state: {state.get('current_phase', 'unknown')}")
                     print(f"Status: {state.get('status', 'unknown')}")
+                    print(f"Development cycle: {state.get('cycle_count', 0)}")
+                    print(f"Current iteration: {state.get('iteration_count', 0)}")
                     
                     # Show requirements
                     if state.get("current_requirements"):
@@ -101,6 +127,16 @@ async def main():
                             if latest:
                                 status = "✅" if latest.get("passed") else "❌"
                                 print(f"- {path}: {status}")
+                    
+                    # Show development history
+                    if state.get("development_history"):
+                        print("\nDevelopment History:")
+                        latest_cycle = state["development_history"][-1]
+                        print(f"Cycle {latest_cycle['cycle']} completed at {latest_cycle['timestamp']}")
+                        if latest_cycle.get("components"):
+                            print("Components developed:")
+                            for path in latest_cycle["components"].keys():
+                                print(f"- {path}")
                     
                     # Show next steps
                     if state.get("next_steps"):

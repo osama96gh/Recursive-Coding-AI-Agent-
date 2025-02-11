@@ -9,6 +9,16 @@ from langchain_openai import ChatOpenAI
 
 # Set up logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Remove existing handlers
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# Create console handler with custom formatter
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+logger.addHandler(console_handler)
 
 from ..config import get_agent_config, STATE_FILE, HISTORY_FILE, PROJECT_ROOT
 from ..state.schema import ProjectState, CodeGenerationStatus
@@ -25,9 +35,9 @@ class RecursiveAgent:
         # Initialize enhanced workflow
         try:
             self.workflow = EnhancedRecursiveWorkflow(self.llm)
-            logger.debug("Enhanced workflow initialized successfully")
+            logger.info("Enhanced workflow initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing workflow: {e}")
+            logger.error(f"Failed to initialize workflow: {e}")
             raise
         
         # Initialize state and history
@@ -85,17 +95,17 @@ class RecursiveAgent:
     async def process_request(self, request: str) -> Dict:
         """Process a user request and return the result."""
         try:
-            logger.debug(f"Processing request in agent: {request}")
+            logger.info(f"Processing request in agent: {request}")
             
             # Update state with new request
             self.state.original_requirements = request
             
             # Execute the workflow
-            logger.debug("Executing enhanced workflow")
+            logger.info("Starting workflow execution")
             try:
                 # The workflow returns the final state
                 final_state = await self.workflow.workflow.ainvoke(self.state.model_dump())
-                logger.debug(f"Workflow execution completed. Final state: {final_state}")
+                logger.info("Workflow execution completed successfully")
                 
                 # Convert final state back to ProjectState
                 self.state = ProjectState(**final_state)
@@ -113,11 +123,11 @@ class RecursiveAgent:
                 }
                 
             except Exception as graph_error:
-                logger.error(f"Workflow execution error: {str(graph_error)}")
+                logger.error(f"Workflow execution failed: {str(graph_error)}")
                 raise graph_error
             
         except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
+            logger.error(f"Request processing failed: {str(e)}")
             error_details = {
                 "error": str(e),
                 "request": request,

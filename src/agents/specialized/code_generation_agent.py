@@ -37,13 +37,21 @@ class CodeGenerationAgent:
             - output/main.py
             - output/src/components/app.js
             - output/lib/utils.ts"""),
-            ("human", """Generate code for the following requirement:
+            ("human", """Generate code for the following requirement in the {file_path} directory:
             {requirement}
             
-            Generate the code in the output directory. For example:
-            - output/main.py for the main application
-            - output/src/components/* for components
-            - output/lib/* for utilities""")
+            Generate the code in the appropriate subdirectory. For example:
+            - main.py for the main application
+            - src/components/* for components
+            - lib/* for utilities
+            
+            Return a JSON object with:
+            {
+                "file_path": "path/to/file",
+                "content": "generated code",
+                "language": "programming language",
+                "dependencies": ["list", "of", "dependencies"]
+            }""")
         ])
     
     async def generate(self, requirement: str, context: Optional[Dict] = None) -> CodeComponent:
@@ -58,9 +66,10 @@ class CodeGenerationAgent:
         """
         chain = self.prompt | self.llm | self.output_parser
         try:
-            # Prepare prompt arguments
+            # Prepare prompt arguments with required variables
             prompt_args = {
-                "requirement": requirement
+                "requirement": requirement,
+                "file_path": "output/",  # Base output directory
             }
             if context:
                 prompt_args.update(context)

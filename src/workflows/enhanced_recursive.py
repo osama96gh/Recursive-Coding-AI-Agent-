@@ -1,6 +1,21 @@
 from typing import Dict, List, Optional
+import datetime
+import logging
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END, START
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Remove existing handlers
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# Create console handler with formatter
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+logger.addHandler(console_handler)
 
 from src.state.schema import ProjectState, CodeComponent, TestResult
 from src.agents.specialized.requirement_agent import RequirementAnalysisAgent
@@ -27,7 +42,9 @@ class EnhancedRecursiveWorkflow:
         Returns:
             Compiled StateGraph for execution
         """
+        # Create workflow
         workflow = StateGraph(ProjectState)
+        
         
         # Add nodes for each phase
         workflow.add_node("analyze_requirements", self._analyze_requirements)
@@ -44,10 +61,12 @@ class EnhancedRecursiveWorkflow:
             self._should_refine,
             {
                 True: "refine_code",
-                False: END
+                False: "think_next_step"
             }
         )
         workflow.add_edge("refine_code", "generate_code")
+        workflow.add_node("think_next_step", self._think_next_step)
+        workflow.add_edge("think_next_step", "analyze_requirements")
         
         return workflow.compile()
     
@@ -61,7 +80,9 @@ class EnhancedRecursiveWorkflow:
             Updated project state with analyzed requirements
         """
         try:
+            logger.info("Starting requirements analysis")
             requirements = await self.requirement_agent.analyze(state.original_requirements)
+            logger.info(f"Generated {len(requirements)} requirements")
             return state.model_copy(update={
                 "current_requirements": requirements,
                 "status": "analyzing",
@@ -82,8 +103,10 @@ class EnhancedRecursiveWorkflow:
         try:
             new_components: Dict[str, CodeComponent] = {}
             
+            logger.info("Starting code generation")
             # If we're refining, use test results to guide improvements
             if state.status == "refining":
+                logger.info("Refining code based on test results")
                 for path, results in state.test_results.items():
                     if not results[-1].passed or results[-1].suggestions:
                         # Get the original requirement that generated this component
@@ -101,12 +124,14 @@ class EnhancedRecursiveWorkflow:
                     component = await self.code_agent.generate(requirement)
                     new_components[component.file_path] = component
             
-            return state.model_copy(update={
+            updated_state = state.model_copy(update={
                 "components": new_components,
                 "status": "generating",
                 "current_phase": "code_generation",
                 "iteration_count": state.iteration_count + 1
             })
+            logger.info(f"Generated {len(new_components)} code components")
+            return updated_state
         except Exception as e:
             return self._handle_error(state, f"Code generation failed: {str(e)}")
     
@@ -120,6 +145,7 @@ class EnhancedRecursiveWorkflow:
             Updated project state with test results
         """
         try:
+            logger.info("Starting code testing")
             test_results: Dict[str, List[TestResult]] = {}
             
             for path, component in state.components.items():
@@ -130,11 +156,13 @@ class EnhancedRecursiveWorkflow:
                 # Append new results to history
                 test_results[path] = prev_results + [result]
             
-            return state.model_copy(update={
+            updated_state = state.model_copy(update={
                 "test_results": test_results,
                 "status": "testing",
                 "current_phase": "testing"
             })
+            logger.info("Code testing completed")
+            return updated_state
         except Exception as e:
             return self._handle_error(state, f"Testing failed: {str(e)}")
     
@@ -148,7 +176,7 @@ class EnhancedRecursiveWorkflow:
             Updated project state with refinement plans
         """
         try:
-            # Identify components that need refinement
+            logger.info("Analyzing test results for refinement")
             refinement_needed = []
             refinement_reasons = []
             
@@ -162,17 +190,20 @@ class EnhancedRecursiveWorkflow:
                     refinement_reasons.append(f"Improvements suggested for {path}: {', '.join(latest.suggestions)}")
             
             if refinement_needed:
-                return state.model_copy(update={
+                logger.info(f"Refinement needed for {len(refinement_needed)} components")
+                updated_state = state.model_copy(update={
                     "status": "refining",
                     "current_phase": "refinement",
                     "next_steps": refinement_reasons
                 })
-            
-            return state.model_copy(update={
-                "status": "complete",
-                "current_phase": "completed",
-                "next_steps": ["All components pass tests and meet quality standards."]
-            })
+            else:
+                logger.info("All components pass quality standards")
+                updated_state = state.model_copy(update={
+                    "status": "complete",
+                    "current_phase": "completed",
+                    "next_steps": ["All components pass tests and meet quality standards."]
+                })
+            return updated_state
         except Exception as e:
             return self._handle_error(state, f"Refinement planning failed: {str(e)}")
     
@@ -185,8 +216,9 @@ class EnhancedRecursiveWorkflow:
         Returns:
             True if refinement is needed, False otherwise
         """
-        # Check if we've hit the maximum iterations
-        if state.iteration_count >= state.max_iterations:
+        # Check if we've hit the maximum iterations or cycles
+        if (state.iteration_count >= state.max_iterations or 
+            state.cycle_count >= state.max_cycles):
             return False
         
         needs_refinement = False
@@ -207,6 +239,51 @@ class EnhancedRecursiveWorkflow:
         
         return needs_refinement
     
+    async def _think_next_step(self, state: ProjectState) -> ProjectState:
+        """Think about the next steps and prepare for the next iteration.
+        
+        Args:
+            state: Current project state
+            
+        Returns:
+            Updated project state ready for next iteration
+        """
+        try:
+            logger.info("Planning next development iteration")
+            # Increment cycle count and reset iteration count
+            state = state.model_copy(update={
+                "cycle_count": state.cycle_count + 1,
+                "iteration_count": 0,
+                "status": "thinking",
+                "current_phase": "next_step_planning",
+                "next_steps": ["Planning next development iteration"]
+            })
+            
+            # Keep existing components and test results for reference
+            # but mark them as previous cycle
+            if state.components:
+                state.previous_components = state.components.copy()
+            if state.test_results:
+                state.previous_test_results = state.test_results.copy()
+            
+            # Add current cycle to development history
+            cycle_summary = {
+                "cycle": state.cycle_count,
+                "components": state.components,
+                "test_results": state.test_results,
+                "timestamp": str(datetime.datetime.now())
+            }
+            state.development_history.append(cycle_summary)
+            
+            # Clear current cycle data
+            state.components = {}
+            state.test_results = {}
+            
+            return state
+            
+        except Exception as e:
+            return self._handle_error(state, f"Next step planning failed: {str(e)}")
+
     def _handle_error(self, state: ProjectState, error_message: str) -> ProjectState:
         """Handle errors by updating state with error information.
         
