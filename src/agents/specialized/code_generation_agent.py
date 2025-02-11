@@ -40,7 +40,10 @@ class CodeGenerationAgent:
             ("human", """Generate code for the following requirement:
             {requirement}
             
-            Suggested file path: {file_path}""")
+            Generate the code in the output directory. For example:
+            - output/main.py for the main application
+            - output/src/components/* for components
+            - output/lib/* for utilities""")
         ])
     
     async def generate(self, requirement: str, context: Optional[Dict] = None) -> CodeComponent:
@@ -57,11 +60,10 @@ class CodeGenerationAgent:
         try:
             # Prepare prompt arguments
             prompt_args = {
-                "requirement": requirement,
-                "file_path": context.get("file_path", "output/main.py") if context else "output/main.py"
+                "requirement": requirement
             }
             if context:
-                prompt_args.update({k: v for k, v in context.items() if k != "file_path"})
+                prompt_args.update(context)
             
             result = await chain.ainvoke(prompt_args)
             

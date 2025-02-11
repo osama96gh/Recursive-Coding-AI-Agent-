@@ -28,6 +28,7 @@ class TestResult(BaseModel):
     passed: bool
     error_message: Optional[str] = None
     execution_time: float
+    suggestions: List[str] = Field(default_factory=list)
 
 class ProjectState(BaseModel):
     # Core tracking

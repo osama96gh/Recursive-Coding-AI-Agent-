@@ -82,9 +82,24 @@ class EnhancedRecursiveWorkflow:
         try:
             new_components: Dict[str, CodeComponent] = {}
             
-            for requirement in state.current_requirements:
-                component = await self.code_agent.generate(requirement)
-                new_components[component.file_path] = component
+            # If we're refining, use test results to guide improvements
+            if state.status == "refining":
+                for path, results in state.test_results.items():
+                    if not results[-1].passed or results[-1].suggestions:
+                        # Get the original requirement that generated this component
+                        component = state.components[path]
+                        # Generate improved version with test feedback
+                        improved = await self.code_agent.generate(
+                            f"Improve the following code based on feedback: {results[-1].error_message or ''}\n"
+                            f"Suggested improvements: {', '.join(results[-1].suggestions)}\n"
+                            f"Original requirement: {state.current_requirements[0]}"  # TODO: Map components to requirements
+                        )
+                        new_components[improved.file_path] = improved
+            else:
+                # Initial generation
+                for requirement in state.current_requirements:
+                    component = await self.code_agent.generate(requirement)
+                    new_components[component.file_path] = component
             
             return state.model_copy(update={
                 "components": new_components,
@@ -108,8 +123,12 @@ class EnhancedRecursiveWorkflow:
             test_results: Dict[str, List[TestResult]] = {}
             
             for path, component in state.components.items():
+                # Get previous test results if they exist
+                prev_results = state.test_results.get(path, [])
+                # Run new tests
                 result = await self.testing_agent.test_component(component)
-                test_results[path] = [result]
+                # Append new results to history
+                test_results[path] = prev_results + [result]
             
             return state.model_copy(update={
                 "test_results": test_results,
@@ -131,20 +150,28 @@ class EnhancedRecursiveWorkflow:
         try:
             # Identify components that need refinement
             refinement_needed = []
+            refinement_reasons = []
+            
             for path, results in state.test_results.items():
-                if not results[-1].passed:
+                latest = results[-1]
+                if not latest.passed:
                     refinement_needed.append(path)
+                    refinement_reasons.append(f"Failed tests in {path}: {latest.error_message}")
+                elif latest.suggestions:
+                    refinement_needed.append(path)
+                    refinement_reasons.append(f"Improvements suggested for {path}: {', '.join(latest.suggestions)}")
             
             if refinement_needed:
                 return state.model_copy(update={
                     "status": "refining",
                     "current_phase": "refinement",
-                    "next_steps": [f"Refine component: {path}" for path in refinement_needed]
+                    "next_steps": refinement_reasons
                 })
             
             return state.model_copy(update={
                 "status": "complete",
-                "current_phase": "completed"
+                "current_phase": "completed",
+                "next_steps": ["All components pass tests and meet quality standards."]
             })
         except Exception as e:
             return self._handle_error(state, f"Refinement planning failed: {str(e)}")
@@ -162,12 +189,23 @@ class EnhancedRecursiveWorkflow:
         if state.iteration_count >= state.max_iterations:
             return False
         
-        # Check if any tests failed
-        for results in state.test_results.values():
-            if not results[-1].passed:
-                return True
+        needs_refinement = False
+        refinement_reasons = []
         
-        return False
+        # Check test results
+        for path, results in state.test_results.items():
+            if results and not results[-1].passed:
+                needs_refinement = True
+                refinement_reasons.append(f"Failed tests in {path}: {results[-1].error_message}")
+            elif results and results[-1].suggestions:
+                needs_refinement = True
+                refinement_reasons.append(f"Improvements suggested for {path}: {', '.join(results[-1].suggestions)}")
+        
+        # Update state with refinement reasons if needed
+        if needs_refinement:
+            state.next_steps = refinement_reasons
+        
+        return needs_refinement
     
     def _handle_error(self, state: ProjectState, error_message: str) -> ProjectState:
         """Handle errors by updating state with error information.

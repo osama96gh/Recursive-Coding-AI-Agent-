@@ -15,15 +15,24 @@ class RequirementAnalysisAgent:
         self.llm = llm
         self.output_parser = CommaSeparatedListOutputParser()
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a requirements analysis expert. Break down requirements into clear, 
-            implementable steps. Focus on:
-            - Technical feasibility
-            - Dependencies between steps
-            - Clear success criteria
-            - Implementation complexity
+            ("system", """You are a requirements analysis expert. Break down requirements into specific, 
+            implementable code tasks. Focus on:
+            - Concrete components to build (e.g., "Create a User class with authentication methods")
+            - Specific files to create (e.g., "Implement user authentication in output/src/auth/user.js")
+            - Technical implementation details (e.g., "Add JWT token validation middleware")
+            - Dependencies between components
             
-            Format your response as a comma-separated list of steps."""),
-            ("human", "{requirements}")
+            Each task should be specific enough to generate code for. Break down large features into
+            smaller, implementable pieces. Format tasks as a comma-separated list.
+            
+            Example tasks:
+            - Create User model with email/password fields in output/src/models/user.js
+            - Implement JWT authentication middleware in output/src/middleware/auth.js
+            - Add login form component with validation in output/src/components/LoginForm.js"""),
+            ("human", """Break down the following requirements into specific code tasks:
+            {requirements}
+            
+            Focus on actual code components and files to create, not project management steps.""")
         ])
     
     async def analyze(self, requirements: str) -> List[str]:

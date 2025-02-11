@@ -88,14 +88,49 @@ class TestingAgent:
         Returns:
             TestResult containing the execution results
         """
-        # TODO: Implement actual test execution logic
-        # For now, return a placeholder result
-        return TestResult(
-            component_path=component.file_path,
-            status="completed",
-            passed=True,  # This should be based on actual test execution
-            execution_time=0.0  # This should be actual execution time
-        )
+        try:
+            # Analyze code quality and potential issues
+            analysis_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are a code quality expert. Analyze the code for:
+                - Potential bugs or errors
+                - Code quality issues
+                - Performance concerns
+                - Security vulnerabilities
+                - Best practice violations
+                
+                Format your response as a JSON object with:
+                {
+                    "passed": boolean,
+                    "issues": ["list", "of", "issues"],
+                    "suggestions": ["list", "of", "improvement", "suggestions"]
+                }"""),
+                ("human", f"""Analyze this {component.language} code:
+                {component.content}
+                
+                Consider the test cases: {test_plan['test_cases']}""")
+            ])
+            
+            chain = analysis_prompt | self.llm | self.output_parser
+            analysis = await chain.ainvoke({})
+            
+            # Create detailed test result
+            return TestResult(
+                component_path=component.file_path,
+                status="completed",
+                passed=analysis["passed"],
+                error_message=None if analysis["passed"] else "\n".join(analysis["issues"]),
+                execution_time=0.0,
+                suggestions=analysis.get("suggestions", [])
+            )
+            
+        except Exception as e:
+            return TestResult(
+                component_path=component.file_path,
+                status="error",
+                passed=False,
+                error_message=f"Test execution failed: {str(e)}",
+                execution_time=0.0
+            )
     
     def _validate_test_results(self, results: TestResult) -> bool:
         """Validate test results for consistency and completeness.
