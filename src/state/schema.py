@@ -1,19 +1,23 @@
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 class CodeGenerationStatus(str, Enum):
     INITIAL = "initial"
-    ANALYZING = "analyzing"
-    GENERATING = "generating"
-    TESTING = "testing"
-    REFINING = "refining"
-    THINKING = "thinking"
+    IN_PROGRESS = "in_progress"
+    NEEDS_HUMAN_INPUT = "needs_human_input"
     COMPLETE = "complete"
     ERROR = "error"
+
+class ActionDecision(BaseModel):
+    action_type: str
+    description: str
+    needs_human_input: bool = False
+    human_query: Optional[str] = None
+    context: Dict[str, Any] = Field(default_factory=dict)
     
     def __str__(self):
-        return self.value
+        return f"{self.action_type}: {self.description}"
 
 class CodeComponent(BaseModel):
     file_path: str
@@ -34,30 +38,28 @@ class TestResult(BaseModel):
 class ProjectState(BaseModel):
     # Core tracking
     status: CodeGenerationStatus = Field(default=CodeGenerationStatus.INITIAL)
-    current_phase: str = Field(default="planning")
     
-    # Requirements
+    # Requirements and context
     original_requirements: str
-    current_requirements: List[str] = Field(default_factory=list)
+    current_context: Dict[str, Any] = Field(default_factory=dict)
     
     # Code management
     components: Dict[str, CodeComponent] = Field(default_factory=dict)
     test_results: Dict[str, List[TestResult]] = Field(default_factory=dict)
     
-    # Previous cycle data
-    previous_components: Dict[str, CodeComponent] = Field(default_factory=dict)
-    previous_test_results: Dict[str, List[TestResult]] = Field(default_factory=dict)
+    # AI decision tracking
+    current_action: Optional[ActionDecision] = None
+    action_history: List[ActionDecision] = Field(default_factory=list)
+    
+    # Human interaction
+    needs_human_input: bool = False
+    human_query: Optional[str] = None
+    human_feedback: Optional[str] = None
     
     # Progress tracking
-    iteration_count: int = Field(default=0)
-    cycle_count: int = Field(default=0)
-    max_iterations: int = Field(default=5)
-    max_cycles: int = Field(default=10)  # Maximum number of recursive cycles
-    features: List[Dict] = Field(default_factory=list)
-    next_steps: List[str] = Field(default_factory=list)
+    step_count: int = Field(default=0)
+    max_steps: int = Field(default=50)  # Safety limit
     
-    # Memory
-    messages: List[Dict] = Field(default_factory=list)
+    # Memory and history
     error_log: List[str] = Field(default_factory=list)
-    tools_output: Dict = Field(default_factory=dict)
     development_history: List[Dict] = Field(default_factory=list)

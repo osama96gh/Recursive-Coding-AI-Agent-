@@ -22,7 +22,7 @@ logger.addHandler(console_handler)
 
 from ..config import get_agent_config, STATE_FILE, HISTORY_FILE, PROJECT_ROOT
 from ..state.schema import ProjectState, CodeGenerationStatus
-from ..workflows.enhanced_recursive import EnhancedRecursiveWorkflow
+from ..workflows.ai_workflow import AIControlledWorkflow
 
 class RecursiveAgent:
     """Agent that recursively develops and enhances software projects."""
@@ -32,10 +32,10 @@ class RecursiveAgent:
         self.config = get_agent_config(config_overrides)
         self.llm = ChatOpenAI(**self.config)
         
-        # Initialize enhanced workflow
+        # Initialize AI-controlled workflow
         try:
-            self.workflow = EnhancedRecursiveWorkflow(self.llm)
-            logger.info("Enhanced workflow initialized successfully")
+            self.workflow = AIControlledWorkflow(self.llm)
+            logger.info("AI-controlled workflow initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize workflow: {e}")
             raise
@@ -109,6 +109,15 @@ class RecursiveAgent:
                 
                 # Convert final state back to ProjectState
                 self.state = ProjectState(**final_state)
+                
+                # Check if we need human input
+                if self.state.status == CodeGenerationStatus.NEEDS_HUMAN_INPUT:
+                    logger.info(f"Workflow needs human input: {self.state.human_query}")
+                    return {
+                        "status": "needs_input",
+                        "query": self.state.human_query,
+                        "state": self.state.model_dump()
+                    }
                 
                 # Save state and history
                 self._save_state()

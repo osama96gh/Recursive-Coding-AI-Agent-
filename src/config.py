@@ -25,6 +25,7 @@ DEFAULT_AGENT_CONFIG = {
     "model": MODEL_NAME,
     "temperature": TEMPERATURE,
     "max_tokens": MAX_TOKENS,
+    "api_key": OPENAI_API_KEY,
 }
 
 # Project state tracking
