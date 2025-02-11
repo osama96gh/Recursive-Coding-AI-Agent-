@@ -24,13 +24,19 @@ class CodeGenerationAgent:
             - Code documentation
             - Testing considerations
             
+            All generated code should be placed in the 'output' directory.
             Format your response as a JSON object with:
             {
-                "file_path": "path/to/file",
+                "file_path": "output/path/to/file",
                 "content": "generated code",
                 "language": "programming language",
                 "dependencies": ["list", "of", "dependencies"]
-            }"""),
+            }
+            
+            Example file paths:
+            - output/main.py
+            - output/src/components/app.js
+            - output/lib/utils.ts"""),
             ("human", """Generate code for the following requirement:
             {requirement}
             
@@ -52,7 +58,7 @@ class CodeGenerationAgent:
             # Prepare prompt arguments
             prompt_args = {
                 "requirement": requirement,
-                "file_path": context.get("file_path", "src/components/main.py") if context else "src/components/main.py"
+                "file_path": context.get("file_path", "output/main.py") if context else "output/main.py"
             }
             if context:
                 prompt_args.update({k: v for k, v in context.items() if k != "file_path"})
@@ -60,8 +66,13 @@ class CodeGenerationAgent:
             result = await chain.ainvoke(prompt_args)
             
             # Create and return CodeComponent
+            # Ensure file path is within output directory
+            file_path = result["file_path"]
+            if not file_path.startswith("output/"):
+                file_path = f"output/{file_path.lstrip('/')}"
+            
             return CodeComponent(
-                file_path=result["file_path"],
+                file_path=file_path,
                 content=result["content"],
                 language=result["language"],
                 dependencies=result["dependencies"],

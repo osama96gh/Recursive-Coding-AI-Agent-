@@ -2,7 +2,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 
-class CodeGenerationStatus(Enum):
+class CodeGenerationStatus(str, Enum):
     INITIAL = "initial"
     ANALYZING = "analyzing"
     GENERATING = "generating"
@@ -10,6 +10,9 @@ class CodeGenerationStatus(Enum):
     REFINING = "refining"
     COMPLETE = "complete"
     ERROR = "error"
+    
+    def __str__(self):
+        return self.value
 
 class CodeComponent(BaseModel):
     file_path: str
