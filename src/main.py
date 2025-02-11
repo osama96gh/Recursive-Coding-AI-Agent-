@@ -14,31 +14,62 @@ from src.state.schema import ProjectState, CodeGenerationStatus
 
 # Set up logging
 class CustomFormatter(logging.Formatter):
-    """Custom formatter that creates structured, readable logs."""
+    """Custom formatter that creates structured, readable logs with workflow details."""
     
     def format(self, record):
         if hasattr(record, 'state'):
-            # Format state updates
-            return f"\n[{record.levelname}] {record.msg}\nState: {record.state}"
+            state_info = record.state
+            if isinstance(state_info, dict):
+                # Format detailed state information
+                state_str = "\nState Details:"
+                state_str += f"\n- Phase: {state_info.get('current_phase', 'unknown')}"
+                state_str += f"\n- Status: {state_info.get('status', 'unknown')}"
+                state_str += f"\n- Cycle: {state_info.get('cycle_count', 0)}"
+                state_str += f"\n- Iteration: {state_info.get('iteration_count', 0)}"
+                
+                # Add requirements if present
+                if state_info.get('current_requirements'):
+                    state_str += "\n- Current Requirements:"
+                    for req in state_info['current_requirements']:
+                        state_str += f"\n  * {req}"
+                
+                # Add components if present
+                if state_info.get('components'):
+                    state_str += "\n- Components:"
+                    for path, comp in state_info['components'].items():
+                        state_str += f"\n  * {path} ({comp.get('status', 'unknown')})"
+                
+                return f"\n[{record.levelname}] {record.msg}{state_str}"
+            return f"\n[{record.levelname}] {record.msg}\nState: {state_info}"
         return f"[{record.levelname}] {record.msg}"
 
-# Configure logging
+def setup_logging():
+    """Set up detailed logging configuration."""
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create console handler with custom formatter
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(CustomFormatter())
+    root_logger.addHandler(console_handler)
+    
+    # Configure specific loggers
+    workflow_logger = logging.getLogger('workflow')
+    workflow_logger.setLevel(logging.INFO)
+    
+    # Disable noisy logs
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
+# Set up logging
+setup_logging()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Remove existing handlers
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-
-# Create console handler with custom formatter
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(CustomFormatter())
-logger.addHandler(console_handler)
-
-# Disable noisy logs
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("openai").setLevel(logging.WARNING)
 
 class RecursiveAgentApp:
     """Application wrapper for the recursive development agent."""
@@ -86,11 +117,13 @@ async def main():
                 continue
             
             while True:
-                # Process the request
-                logger.info(f"\nProcessing request: {request}")
+                # Process the request with detailed logging
+                logger.info(f"\nProcessing new request: {request}")
+                logger.info("Starting recursive development workflow")
                 result = await app.process_request(request)
+                
                 if result.get("status") == "success":
-                    logger.info("Request processed successfully")
+                    logger.info("Request processed successfully", extra={"state": result.get("state", {})})
                 
                 # Display result
                 if result.get("status") == "success":

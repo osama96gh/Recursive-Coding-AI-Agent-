@@ -81,8 +81,13 @@ class EnhancedRecursiveWorkflow:
         """
         try:
             logger.info("Starting requirements analysis")
+            logger.info(f"Input requirements: {state.original_requirements}")
+            
             requirements = await self.requirement_agent.analyze(state.original_requirements)
-            logger.info(f"Generated {len(requirements)} requirements")
+            
+            logger.info(f"Generated {len(requirements)} requirements:")
+            for i, req in enumerate(requirements, 1):
+                logger.info(f"{i}. {req}")
             return state.model_copy(update={
                 "current_requirements": requirements,
                 "status": "analyzing",
@@ -103,10 +108,22 @@ class EnhancedRecursiveWorkflow:
         try:
             new_components: Dict[str, CodeComponent] = {}
             
-            logger.info("Starting code generation")
+            logger.info("\n=== Starting Code Generation ===")
+            logger.info(f"Current Phase: {state.current_phase}")
+            logger.info(f"Iteration: {state.iteration_count}")
             # If we're refining, use test results to guide improvements
             if state.status == "refining":
-                logger.info("Refining code based on test results")
+                logger.info("\nRefining code based on test results:")
+                for path, results in state.test_results.items():
+                    latest = results[-1]
+                    logger.info(f"\nComponent: {path}")
+                    logger.info(f"Test Status: {'Passed' if latest.passed else 'Failed'}")
+                    if not latest.passed:
+                        logger.info(f"Error: {latest.error_message}")
+                    if latest.suggestions:
+                        logger.info("Suggestions:")
+                        for suggestion in latest.suggestions:
+                            logger.info(f"- {suggestion}")
                 for path, results in state.test_results.items():
                     if not results[-1].passed or results[-1].suggestions:
                         # Get the original requirement that generated this component
@@ -145,14 +162,26 @@ class EnhancedRecursiveWorkflow:
             Updated project state with test results
         """
         try:
-            logger.info("Starting code testing")
+            logger.info("\n=== Starting Code Testing ===")
+            logger.info(f"Testing {len(state.components)} components:")
+            for path in state.components:
+                logger.info(f"- {path}")
             test_results: Dict[str, List[TestResult]] = {}
             
             for path, component in state.components.items():
+                logger.info(f"\nTesting component: {path}")
                 # Get previous test results if they exist
                 prev_results = state.test_results.get(path, [])
                 # Run new tests
                 result = await self.testing_agent.test_component(component)
+                # Log test results
+                logger.info(f"Test Status: {'Passed' if result.passed else 'Failed'}")
+                if not result.passed:
+                    logger.info(f"Error: {result.error_message}")
+                if result.suggestions:
+                    logger.info("Suggestions for improvement:")
+                    for suggestion in result.suggestions:
+                        logger.info(f"- {suggestion}")
                 # Append new results to history
                 test_results[path] = prev_results + [result]
             
@@ -161,7 +190,7 @@ class EnhancedRecursiveWorkflow:
                 "status": "testing",
                 "current_phase": "testing"
             })
-            logger.info("Code testing completed")
+            logger.info("\nCode testing completed")
             return updated_state
         except Exception as e:
             return self._handle_error(state, f"Testing failed: {str(e)}")
@@ -176,7 +205,8 @@ class EnhancedRecursiveWorkflow:
             Updated project state with refinement plans
         """
         try:
-            logger.info("Analyzing test results for refinement")
+            logger.info("\n=== Starting Code Refinement Analysis ===")
+            logger.info(f"Analyzing test results for {len(state.test_results)} components")
             refinement_needed = []
             refinement_reasons = []
             
@@ -190,14 +220,16 @@ class EnhancedRecursiveWorkflow:
                     refinement_reasons.append(f"Improvements suggested for {path}: {', '.join(latest.suggestions)}")
             
             if refinement_needed:
-                logger.info(f"Refinement needed for {len(refinement_needed)} components")
+                logger.info(f"\nRefinement needed for {len(refinement_needed)} components:")
+                for reason in refinement_reasons:
+                    logger.info(f"- {reason}")
                 updated_state = state.model_copy(update={
                     "status": "refining",
                     "current_phase": "refinement",
                     "next_steps": refinement_reasons
                 })
             else:
-                logger.info("All components pass quality standards")
+                logger.info("\nAll components pass quality standards ✅")
                 updated_state = state.model_copy(update={
                     "status": "complete",
                     "current_phase": "completed",
