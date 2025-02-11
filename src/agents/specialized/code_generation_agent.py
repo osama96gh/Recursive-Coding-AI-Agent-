@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -34,9 +34,10 @@ class CodeGenerationAgent:
             # Generate structured prompt
             generation_context = {
                 "requirement": requirement,
-                "base_path": "output/",
-                **context if context else {}
+                "base_path": "output/"
             }
+            if context:
+                generation_context.update(context)
             
             prompt = self.prompt_generator.generate_prompt(
                 "generate",
