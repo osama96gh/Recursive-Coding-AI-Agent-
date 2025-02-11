@@ -1,17 +1,35 @@
 from typing import Dict, Any, Optional, List
 import json
 import logging
-import datetime
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END, START
 from pydantic import BaseModel
 
-from src.state.schema import ProjectState, CodeGenerationStatus, ActionDecision, CodeComponent, TestResult
+from src.state.schema import (
+    ProjectState, 
+    CodeGenerationStatus, 
+    ActionDecision, 
+    CodeComponent, 
+    TestResult,
+    EnhancedActionResult,
+    CodeAnalysisOutput
+)
+from src.agents.tools.output_validator import OutputValidator
+from src.agents.tools.prompt_generator import StructuredPromptGenerator
 
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Remove existing handlers
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# Create console handler with custom formatter
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+logger.addHandler(console_handler)
 
 class AIWorkflowSupervisor:
     """AI-driven workflow supervisor that dynamically controls the development process."""
@@ -23,6 +41,8 @@ class AIWorkflowSupervisor:
             llm: The language model to use for decision making and execution
         """
         self.llm = llm
+        self.output_validator = OutputValidator()
+        self.prompt_generator = StructuredPromptGenerator()
     
     async def decide_next_action(self, state: ProjectState) -> ActionDecision:
         """Determine the next action based on current project state.
@@ -61,39 +81,95 @@ class AIWorkflowSupervisor:
             ] if state.action_history else []
         }
         
-        # Generate decision messages
-        messages = [
-            SystemMessage(content="You are an AI project manager overseeing a code generation project. You must respond with ONLY a JSON object, no additional text or explanation."),
-            HumanMessage(content=f"""Current Context:
-{json.dumps(context, indent=2)}
-
-Your task is to decide the next best action. Consider:
+        # Generate decision prompt with enhanced instructions
+        prompt = self.prompt_generator.generate_prompt(
+            "analyze",  # Use analyze type for decision making
+            context,
+            additional_instructions="""
+Consider:
 1. Project requirements and current progress
 2. Code quality and test results
 3. Recent actions and their outcomes
 4. Whether human input might be needed
 
-Respond with ONLY a JSON object in this format:
-{{
+Your response must include:
+1. Insights about the current state
+2. Recommendations for next steps
+3. Code quality metrics if applicable
+4. Priority actions to take
+
+Also include a "decision" object in the metadata with this structure:
+{
     "action_type": "string (e.g., 'analyze', 'generate', 'test', 'refactor', 'ask_human')",
     "description": "string explaining the action",
     "needs_human_input": boolean,
     "human_query": "string (if needs_human_input is true)",
-    "context": {{
+    "context": {
         "relevant_files": ["list of files to focus on"],
         "specific_focus": "string describing specific aspect to address",
         "expected_outcome": "string describing what this action should achieve"
-    }}
-}}""")
+    }
+}"""
+        )
+        
+        messages = [
+            SystemMessage(content="You are an AI project manager overseeing a code generation project."),
+            HumanMessage(content=prompt)
         ]
         
         response = await self.llm.ainvoke(messages)
         
         try:
-            # Extract content from AIMessage
+            # Extract content and validate
             content = response.content if hasattr(response, 'content') else str(response)
-            decision_data = json.loads(content)
-            return ActionDecision(**decision_data)
+            logger.info(f"Raw LLM response for decision making:\n{content}")
+            
+            validated_result = await self.output_validator.validate_and_parse(
+                content,
+                "analyze",
+                context={"decision_making": True}
+            )
+            logger.info(f"Validated decision result:\n{json.dumps(validated_result.dict(), indent=2)}")
+            
+            # Try to extract decision data from different places
+            decision_data = None
+            logger.info("Attempting to extract decision data...")
+            
+            # First try metadata
+            if validated_result.output.metadata.get("decision"):
+                logger.info("Found decision data in metadata")
+                decision_data = validated_result.output.metadata["decision"]
+            
+            # If not in metadata, try to construct from analysis output
+            elif isinstance(validated_result.output, CodeAnalysisOutput):
+                logger.info("Constructing decision data from analysis output")
+                insights = validated_result.output.insights
+                recommendations = validated_result.output.recommendations
+                priority_actions = validated_result.output.priority_actions
+                
+                if priority_actions:
+                    first_action = priority_actions[0]
+                    # Determine action type from the content
+                    action_type = "generate" if any(word in first_action.lower() for word in ["implement", "create", "build", "generate"]) else "analyze"
+                    
+                    decision_data = {
+                        "action_type": action_type,
+                        "description": first_action,
+                        "needs_human_input": False,
+                        "context": {
+                            "relevant_files": [],  # Will be populated based on context
+                            "specific_focus": first_action,
+                            "expected_outcome": recommendations[0] if recommendations else "Improve code quality",
+                            "insights": insights,
+                            "recommendations": recommendations
+                        }
+                    }
+            
+            if decision_data:
+                return ActionDecision(**decision_data)
+            else:
+                raise ValueError("Could not extract or construct valid decision data")
+            
         except Exception as e:
             logger.error(f"Error parsing AI decision: {e}")
             # Return a safe default decision
@@ -146,10 +222,14 @@ Respond with ONLY a JSON object in this format:
                 })
             
             # Execute the action
+            logger.info(f"Executing action: {action.action_type} - {action.description}")
             result = await self.execute_action(action, state)
+            logger.info(f"Action result:\n{json.dumps(result, indent=2)}")
             
             # Update state based on result
-            return self.update_state_with_result(state, action, result)
+            updated_state = self.update_state_with_result(state, action, result)
+            logger.info(f"Updated state status: {updated_state.status}")
+            return updated_state
             
         except Exception as e:
             logger.error(f"Error in execute_step: {e}")
@@ -168,8 +248,15 @@ Respond with ONLY a JSON object in this format:
         Returns:
             Dictionary containing the result of the action
         """
-        # Generate appropriate prompt based on action type
-        prompt = self.generate_action_prompt(action, state)
+        # Generate appropriate prompt using StructuredPromptGenerator
+        prompt = self.prompt_generator.generate_prompt(
+            action.action_type,
+            {
+                "action": action.dict(),
+                "state": state.dict(),
+                "context": state.current_context
+            }
+        )
         
         # Execute through LLM
         messages = [
@@ -179,80 +266,83 @@ Respond with ONLY a JSON object in this format:
         response = await self.llm.ainvoke(messages)
         
         try:
-            # Extract content from AIMessage and parse result
+            # Extract content and validate using OutputValidator
             content = response.content if hasattr(response, 'content') else str(response)
-            result = json.loads(content)
-            return self.validate_action_result(result, action)
+            logger.info(f"Raw LLM response for action {action.action_type}:\n{content}")
+            
+            validated_result = await self.output_validator.validate_and_parse(
+                content,
+                action.action_type,
+                context=action.context
+            )
+            logger.info(f"Validated action result:\n{json.dumps(validated_result.dict(), indent=2)}")
+            
+            # Return the validated result
+            return validated_result.dict()
+            
         except Exception as e:
             logger.error(f"Error executing action: {e}")
-            return {
-                "error": str(e),
-                "status": "failed",
-                "action_type": action.action_type
-            }
+            # Try to repair malformed output
+            try:
+                repaired_output = await self.output_validator.repair_malformed_output(
+                    content,
+                    action.action_type,
+                    self._get_expected_schema(action.action_type)
+                )
+                # Validate and return repaired output
+                validated_result = await self.output_validator.validate_and_parse(
+                    repaired_output,
+                    action.action_type,
+                    context=action.context
+                )
+                return validated_result.dict()
+            except Exception as repair_error:
+                logger.error(f"Error repairing output: {repair_error}")
+                return {
+                    "error": str(e),
+                    "status": "failed",
+                    "action_type": action.action_type
+                }
     
-    def generate_action_prompt(self, action: ActionDecision, state: ProjectState) -> str:
-        """Generate an appropriate prompt for the given action.
-        
-        Args:
-            action: The action to generate a prompt for
-            state: Current project state
-            
-        Returns:
-            Prompt string for the LLM
-        """
-        base_context = {
-            "requirements": state.original_requirements,
-            "current_context": state.current_context,
-            "action_context": action.context
-        }
-        
-        prompts = {
-            "analyze": f"""Analyze the following project context and provide insights:
-{json.dumps(base_context, indent=2)}
-
-You must respond with ONLY a JSON object in the following format, with no additional text or explanation:
-{{
-    "insights": ["list of key insights"],
-    "recommendations": ["list of recommendations"],
-    "next_focus": "string describing what to focus on next"
-}}""",
-            "generate": f"""Generate code based on the following context:
-{json.dumps(base_context, indent=2)}
-
-You must respond with ONLY a JSON object in the following format, with no additional text or explanation:
-{{
-    "file_path": "string",
-    "content": "string (the actual code)",
-    "language": "string",
-    "dependencies": ["list of dependencies"]
-}}""",
-            "test": f"""Evaluate the following code components:
-{json.dumps({
-    **base_context,
-    "components": state.components
-}, indent=2)}
-
-You must respond with ONLY a JSON object in the following format, with no additional text or explanation:
-{{
-    "test_results": [
-        {{
-            "component_path": "string",
-            "passed": boolean,
-            "error_message": "string (if failed)",
-            "suggestions": ["list of improvement suggestions"]
-        }}
-    ]
-}}"""
-        }
-        
-        return prompts.get(action.action_type, f"""Execute the following action:
-{json.dumps({
-    "action": action.dict(),
-    "context": base_context
-}, indent=2)}
-
-You must respond with ONLY a JSON object containing the results of this action, with no additional text or explanation.""")
+    def _get_expected_schema(self, action_type: str) -> Dict[str, Any]:
+        """Get the expected schema for a given action type."""
+        if action_type == "analyze":
+            return {
+                "insights": ["string"],
+                "recommendations": ["string"],
+                "code_quality_metrics": {
+                    "complexity": "float",
+                    "maintainability": "float",
+                    "documentation": "float"
+                },
+                "priority_actions": ["string"]
+            }
+        elif action_type == "generate":
+            return {
+                "file_path": "string",
+                "content": "string",
+                "language": "string",
+                "dependencies": ["string"],
+                "quality_checks": {
+                    "syntax_valid": "boolean",
+                    "follows_style_guide": "boolean",
+                    "has_documentation": "boolean"
+                }
+            }
+        elif action_type == "test":
+            return {
+                "test_cases": [{
+                    "name": "string",
+                    "status": "string",
+                    "error_message": "string (optional)"
+                }],
+                "coverage": {
+                    "line_coverage": "float",
+                    "branch_coverage": "float"
+                }
+            }
+        else:
+            return {}
     
     def validate_action_result(self, result: Dict[str, Any], action: ActionDecision) -> Dict[str, Any]:
         """Validate and process the result of an action.
@@ -266,7 +356,6 @@ You must respond with ONLY a JSON object containing the results of this action, 
         """
         # Add metadata to result
         result["action_type"] = action.action_type
-        result["timestamp"] = str(datetime.datetime.now())
         
         # Validate based on action type
         if action.action_type == "generate" and "file_path" not in result:
@@ -329,8 +418,7 @@ You must respond with ONLY a JSON object containing the results of this action, 
         history_entry = {
             "step": state.step_count,
             "action": action.dict(),
-            "result": result,
-            "timestamp": result.get("timestamp", str(datetime.datetime.now()))
+            "result": result
         }
         updates["development_history"] = state.development_history + [history_entry]
         

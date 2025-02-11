@@ -95,13 +95,23 @@ class RecursiveAgent:
     async def process_request(self, request: str) -> Dict:
         """Process a user request and return the result."""
         try:
-            logger.info(f"Processing request in agent: {request}")
+            logger.info("="*80)
+            logger.info(f"Processing new request: {request}")
+            logger.info("="*80)
+            
+            # Log initial state
+            logger.info("Current state before processing:")
+            logger.info(f"- Status: {self.state.status}")
+            logger.info(f"- Step count: {self.state.step_count}")
+            logger.info(f"- Components: {len(self.state.components)}")
+            logger.info(f"- Test results: {len(self.state.test_results)}")
             
             # Update state with new request
             self.state.original_requirements = request
+            logger.info("Updated state with new requirements")
             
             # Execute the workflow
-            logger.info("Starting workflow execution")
+            logger.info("\nStarting workflow execution...")
             try:
                 # The workflow returns the final state
                 final_state = await self.workflow.workflow.ainvoke(self.state.model_dump())
@@ -109,22 +119,37 @@ class RecursiveAgent:
                 
                 # Convert final state back to ProjectState
                 self.state = ProjectState(**final_state)
+                logger.info("\nWorkflow execution completed")
+                logger.info("Final state summary:")
+                logger.info(f"- Status: {self.state.status}")
+                logger.info(f"- Step count: {self.state.step_count}")
+                logger.info(f"- Components: {len(self.state.components)}")
+                logger.info(f"- Test results: {len(self.state.test_results)}")
                 
                 # Check if we need human input
                 if self.state.status == CodeGenerationStatus.NEEDS_HUMAN_INPUT:
-                    logger.info(f"Workflow needs human input: {self.state.human_query}")
+                    logger.info(f"\nWorkflow needs human input:")
+                    logger.info(f"Query: {self.state.human_query}")
                     return {
                         "status": "needs_input",
                         "query": self.state.human_query,
                         "state": self.state.model_dump()
                     }
                 
+                # Log any error messages
+                if self.state.error_log:
+                    logger.info("\nError log entries:")
+                    for error in self.state.error_log:
+                        logger.error(f"- {error}")
+                
                 # Save state and history
+                logger.info("\nSaving state and history...")
                 self._save_state()
                 self._add_to_history("process_request", {
                     "request": request,
                     "final_state": self.state.model_dump()
                 })
+                logger.info("State and history saved successfully")
                 
                 return {
                     "status": "success",
@@ -132,11 +157,17 @@ class RecursiveAgent:
                 }
                 
             except Exception as graph_error:
-                logger.error(f"Workflow execution failed: {str(graph_error)}")
+                logger.error("\nWorkflow execution failed:")
+                logger.error(f"Error type: {type(graph_error).__name__}")
+                logger.error(f"Error message: {str(graph_error)}")
+                logger.error("Stack trace:", exc_info=True)
                 raise graph_error
             
         except Exception as e:
-            logger.error(f"Request processing failed: {str(e)}")
+            logger.error("\nRequest processing failed:")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error("Stack trace:", exc_info=True)
             error_details = {
                 "error": str(e),
                 "request": request,

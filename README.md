@@ -24,18 +24,7 @@ git clone https://github.com/yourusername/recursive-agent.git
 cd recursive-agent
 ```
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Copy the environment template and configure your settings:
+2. Copy the environment template and configure your settings:
 ```bash
 cp .env.template .env
 ```
@@ -44,9 +33,26 @@ Edit `.env` and add your OpenAI API key and other configurations.
 
 ## Usage
 
-1. Start the agent:
+The project includes a Makefile for common operations:
+
+1. Initialize the environment (create virtual environment and install dependencies):
 ```bash
-python -m src.main
+make init
+```
+
+2. Start the agent:
+```bash
+make run
+```
+
+3. Clean up generated files and virtual environment:
+```bash
+make clean
+```
+
+4. Run project tests:
+```bash
+make test
 ```
 
 2. Enter your high-level project request, for example:
